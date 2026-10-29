@@ -1,0 +1,5 @@
+{
+  "userRoleOptions": ["-- Select --", "Admin", "ESS"],
+  "statusOptions": ["-- Select --", "Enabled", "Disabled"],
+  "userTableColumns": ["Username", "User Role", "Employee Name", "Status", "Actions"]
+}

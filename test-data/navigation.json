@@ -1,0 +1,25 @@
+{
+  "menuItems": [
+    { "item": "Admin", "urlPart": "/admin/", "title": "Admin" },
+    { "item": "PIM", "urlPart": "/pim/", "title": "PIM" },
+    { "item": "Leave", "urlPart": "/leave/", "title": "Leave" },
+    { "item": "Time", "urlPart": "/time/", "title": "Time" },
+    { "item": "Recruitment", "urlPart": "/recruitment/", "title": "Recruitment" },
+    { "item": "My Info", "urlPart": "/pim/viewPersonalDetails/", "title": "PIM" },
+    { "item": "Performance", "urlPart": "/performance/", "title": "Performance" },
+    { "item": "Dashboard", "urlPart": "/dashboard/", "title": "Dashboard" },
+    { "item": "Directory", "urlPart": "/directory/", "title": "Directory" },
+    { "item": "Claim", "urlPart": "/claim/", "title": "Claim" },
+    { "item": "Buzz", "urlPart": "/buzz/", "title": "Buzz" }
+  ],
+  "dashboardWidgets": [
+    "Time at Work",
+    "My Actions",
+    "Quick Launch",
+    "Buzz Latest Posts",
+    "Employees on Leave Today",
+    "Employee Distribution by Sub Unit",
+    "Employee Distribution by Location"
+  ],
+  "userMenuItems": ["About", "Support", "Change Password", "Logout"]
+}

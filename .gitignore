@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Playwright output
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Saved login session (contains auth cookies)
+/.auth/
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
+
+# Stray empty git repository created inside the project; not part of the framework
+/Orangehrm/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log

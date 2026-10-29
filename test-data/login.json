@@ -1,0 +1,12 @@
+{
+  "invalidCredentials": [
+    { "title": "wrong password", "username": "Admin", "password": "wrongPass123" },
+    { "title": "unknown username", "username": "no_such_user_x9", "password": "admin123" },
+    { "title": "username with wrong case and wrong password", "username": "ADMIN", "password": "Admin123" }
+  ],
+  "missingFields": [
+    { "title": "both fields empty", "username": "", "password": "", "requiredFields": ["Username", "Password"] },
+    { "title": "username empty", "username": "", "password": "admin123", "requiredFields": ["Username"] },
+    { "title": "password empty", "username": "Admin", "password": "", "requiredFields": ["Password"] }
+  ]
+}
