@@ -1,7 +1,7 @@
 {
-  "_comment": "Known WCAG 2.1 AA violations in OrangeHRM 5.9, measured with axe-core 4.14 on 2026-10-30. Tests fail only on rules NOT listed here. Remove a rule once it is fixed so it can't come back.",
+  "_comment": "Known WCAG 2.1 AA violations in OrangeHRM 5.9, measured with axe-core 4.14 on 2026-10-30 after network idle (all widgets loaded). Tests fail only on rules NOT listed here. Remove a rule once it is fixed so it can't come back. Dashboard image-alt and scrollable-region-focusable come from widgets that load late, so they were only found once scans waited for network idle.",
   "login": ["color-contrast", "html-has-lang", "link-name"],
-  "dashboard": ["button-name", "color-contrast", "html-has-lang", "list"],
+  "dashboard": ["button-name", "color-contrast", "html-has-lang", "image-alt", "list", "scrollable-region-focusable"],
   "employeeList": ["button-name", "color-contrast", "html-has-lang", "label", "list"],
   "addEmployee": ["button-name", "color-contrast", "html-has-lang", "label", "list"]
 }

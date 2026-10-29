@@ -12,9 +12,14 @@
     "test:webkit": "playwright test --project=webkit",
     "test:api": "playwright test --project=api",
     "test:security": "playwright test --project=security",
+    "test:headless": "playwright test",
     "test:headed": "playwright test --headed",
+    "test:headed:chromium": "playwright test --headed --project=chromium",
+    "test:failed": "playwright test --last-failed",
     "test:debug": "playwright test --debug",
     "report": "playwright show-report",
+    "allure:generate": "allure generate allure-results --config allurerc.mjs --clean",
+    "allure:open": "allure open --config allurerc.mjs",
     "typecheck": "tsc --noEmit",
     "install:browsers": "playwright install --with-deps chromium firefox webkit"
   },
@@ -32,6 +37,8 @@
     "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.6",
+    "allure": "^3.22.1",
+    "allure-playwright": "^3.14.0",
     "dotenv": "^18.0.9",
     "typescript": "^7.0.2"
   }

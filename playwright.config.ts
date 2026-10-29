@@ -7,18 +7,22 @@ const UI_IGNORE = ['**/api/**', '**/security/**'];
 /**
  * The target is a public, shared demo server: it can be slow and other people
  * change its data concurrently. Timeouts are generous, every test creates its
- * own uniquely named data, and CI retries to absorb network flakiness.
+ * own uniquely named data, and failed tests are retried to absorb network flakiness.
  *
  * Environment variables (all optional; see .env.example):
  *   BASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD   target and credentials
  *   WORKERS    parallel workers (number or percentage, e.g. "50%"); default 2
- *   RETRIES    retry count; default 2 on CI, 0 locally
- *   HEADED     "1"/"true" to show browsers (same as the --headed CLI flag)
+ *   RETRIES    times a failed test is retried; default 2 (locally and on CI), 0 = off
+ *   HEADED     "1"/"true" to show browsers (same as the --headed CLI flag); default headless
+ *   SLOW_MO    milliseconds to pause between browser actions, to follow a headed run; default 0
+ *   ALERT_WEBHOOK_URL  Slack/Teams webhook for failure alerts
+ *   ALLURE_GENERATE    "false" to skip building the Allure report after a run
  */
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
   forbidOnly: env.isCI,
+  // A failed test runs again up to twice. Passing on a retry is reported as "flaky", never as a clean pass.
   retries: env.retries,
   // Kept low by default: many parallel sessions make the shared demo server time out.
   workers: env.workers,
@@ -31,11 +35,34 @@ export default defineConfig({
     ['junit', { outputFile: 'test-results/junit.xml' }],
     // Writes test-results/run-summary.json; alerts Slack/Teams on failure when ALERT_WEBHOOK_URL is set.
     ['./src/utils/reporters/FailureAlertReporter.ts'],
+    // Allure: raw results per test (with failure screenshots, videos and traces attached)...
+    [
+      'allure-playwright',
+      {
+        resultsDir: 'allure-results',
+        detail: true,
+        suiteTitle: true,
+        environmentInfo: {
+          'Base URL': env.baseUrl,
+          'Node.js': process.version,
+          OS: `${process.platform} ${process.arch}`,
+          Workers: String(env.workers),
+          Retries: String(env.retries),
+          Mode: env.headed ? 'headed' : 'headless',
+          CI: env.isCI ? 'yes' : 'no',
+        },
+      },
+    ],
+    // ...then the HTML report, built automatically after every run (must come after allure-playwright).
+    ['./src/utils/reporters/AllureReportGenerator.ts'],
   ],
 
   use: {
     baseURL: env.baseUrl,
+    // Headless by default; headed with --headed or HEADED=true.
     headless: !env.headed,
+    launchOptions: { slowMo: env.slowMo },
+    // Failure evidence, attached to the HTML and Allure reports.
     trace: 'retain-on-failure-and-retries',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

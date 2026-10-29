@@ -84,6 +84,56 @@ test.describe('BrowserHelper', () => {
     expect(response.status()).toBe(200);
   });
 
+  test('isNetworkError recognises each engine\'s network failures, not app errors', { tag: '@regression' }, () => {
+    const networkErrors = [
+      'page.goto: net::ERR_CONNECTION_RESET at https://x/', // Chromium
+      'page.goto: Navigation to "https://x/" is interrupted by another navigation to "chrome-error://chromewebdata/"', // Chromium
+      'page.goto: NS_ERROR_NET_TIMEOUT', // Firefox
+      'page.goto: Timeout was reached', // WebKit: seen in a real run against the demo server
+      'page.goto: Could not connect to server', // WebKit
+      'page.goto: Timeout 30000ms exceeded.', // Playwright navigation timeout
+    ];
+    for (const message of networkErrors) expect(BrowserHelper.isNetworkError(message), message).toBe(true);
+
+    for (const message of ['expect(locator).toBeVisible() failed', 'page.goto: Protocol error (Page.navigate): Cannot navigate to invalid URL']) {
+      expect(BrowserHelper.isNetworkError(message), message).toBe(false);
+    }
+  });
+
+  // End-to-end retry with a simulated failure. WebKit is skipped: there, an aborted
+  // route surfaces as "Blocked by Web Inspector" (an interception artefact), not as
+  // a real network error; WebKit's real wording is covered by the test above.
+  for (const failure of ['timedout', 'connectionreset', 'connectionfailed', 'internetdisconnected'] as const) {
+    test(`gotoWithRetry retries a page that failed to load (${failure})`, { tag: '@regression' }, async ({ page, browserName }, testInfo) => {
+      test.skip(browserName === 'webkit', 'Route aborts in WebKit are not real network errors; see isNetworkError test');
+      let attempts = 0;
+      await page.route('https://helpers.test/page', (route) => {
+        attempts++;
+        return attempts === 1 ? route.abort(failure) : route.fulfill({ body: '<h1>Loaded</h1>', contentType: 'text/html' });
+      });
+
+      await BrowserHelper.gotoWithRetry(page, 'https://helpers.test/page');
+
+      expect(attempts).toBe(2);
+      await expect(page.getByRole('heading', { name: 'Loaded' })).toBeVisible();
+      expect(testInfo.annotations.map((a) => a.type)).toContain('navigation-retry');
+    });
+  }
+
+  test('gotoWithRetry does not retry application errors', { tag: '@regression' }, async ({ page }) => {
+    let attempts = 0;
+    await page.route('https://helpers.test/broken', (route) => {
+      attempts++;
+      return route.fulfill({ status: 500, body: '<h1>Server error</h1>', contentType: 'text/html' });
+    });
+
+    const response = await BrowserHelper.gotoWithRetry(page, 'https://helpers.test/broken');
+
+    // A 500 page loaded fine at the network level: report it to the test, don't hide it with a retry.
+    expect(response?.status()).toBe(500);
+    expect(attempts).toBe(1);
+  });
+
   test('clearSession removes cookies and storage', { tag: '@regression' }, async ({ page, context }) => {
     await page.route('https://helpers.test/', (route) => route.fulfill({ body: '<p>app</p>', contentType: 'text/html' }));
     await page.goto('https://helpers.test/');

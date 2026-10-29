@@ -96,3 +96,67 @@ jobs:
             !test-results/junit.xml
           if-no-files-found: ignore
           retention-days: 7
+
+      # Allure report for this project (one self-contained index.html), built by AllureReportGenerator.
+      - name: Upload Allure report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ matrix.project }}
+          path: allure-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Raw Allure results, merged into one report by the allure-combined job below.
+      - name: Upload Allure results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ matrix.project }}
+          path: allure-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # One Allure report with the pass/fail results of every project, even when some jobs failed.
+  allure-combined:
+    name: Allure report (all projects)
+    needs: test
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js (LTS)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies from the lockfile
+        run: npm ci
+
+      - name: Download every project's Allure results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-*
+          path: all-allure-results
+
+      - name: Generate the combined Allure report
+        run: |
+          if [ -z "$(ls -A all-allure-results 2>/dev/null)" ]; then
+            echo "No Allure results were produced." >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          npx allure generate all-allure-results/* --config allurerc.mjs
+          node -e "const s=require('./allure-report/summary.json').stats; console.log('### Allure: ' + Object.entries(s).map(([k,v]) => k + ' ' + v).join(' | '))" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the combined Allure report
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-combined
+          path: allure-report/
+          if-no-files-found: ignore
+          retention-days: 30

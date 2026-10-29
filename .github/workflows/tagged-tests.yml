@@ -1,0 +1,230 @@
+name: Tagged Test Run
+
+# Run tests by tag on demand: Actions tab -> "Tagged Test Run" -> Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Which tests to run'
+        type: choice
+        default: '@smoke'
+        options:
+          - '@smoke'
+          - '@regression'
+          - all
+      projects:
+        description: 'Where to run them'
+        type: choice
+        default: all
+        options:
+          - all          # chromium, firefox, webkit, api, security
+          - ui-browsers  # chromium, firefox, webkit
+          - chromium
+          - firefox
+          - webkit
+          - api
+          - security
+      mode:
+        description: 'Browser mode (headed runs inside a virtual display on the CI runner)'
+        type: choice
+        default: headless
+        options:
+          - headless
+          - headed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tagged-tests-${{ github.ref }}-${{ inputs.tag }}-${{ inputs.projects }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Plan (${{ inputs.tag }} on ${{ inputs.projects }}, ${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      grep: ${{ steps.plan.outputs.grep }}
+      label: ${{ steps.plan.outputs.label }}
+    steps:
+      - name: Build the job matrix from the inputs
+        id: plan
+        # Inputs are passed via env (never inlined into the script) and validated
+        # against an allow-list, because the API can send values outside the dropdown.
+        env:
+          TAG: ${{ inputs.tag }}
+          PROJECTS: ${{ inputs.projects }}
+        run: |
+          case "$TAG" in
+            @smoke|@regression) grep="$TAG"; label="${TAG#@}" ;;
+            all) grep=""; label="all" ;;
+            *) echo "::error::Unsupported tag: $TAG"; exit 1 ;;
+          esac
+          case "$PROJECTS" in
+            all) list="chromium firefox webkit api security" ;;
+            ui-browsers) list="chromium firefox webkit" ;;
+            chromium|firefox|webkit|api|security) list="$PROJECTS" ;;
+            *) echo "::error::Unsupported projects value: $PROJECTS"; exit 1 ;;
+          esac
+
+          # api and security still need Chromium for the login setup project.
+          entries=""
+          for project in $list; do
+            case "$project" in firefox|webkit) browser="$project" ;; *) browser="chromium" ;; esac
+            entries="${entries}{\"project\":\"$project\",\"browser\":\"$browser\"},"
+          done
+
+          {
+            echo "matrix={\"include\":[${entries%,}]}"
+            echo "grep=$grep"
+            echo "label=$label"
+          } >> "$GITHUB_OUTPUT"
+          echo "Running '${TAG}' on: ${list}" >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    name: ${{ needs.plan.outputs.label }} (${{ matrix.project }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      CI: 'true'
+      BASE_URL: ${{ vars.BASE_URL }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js (LTS)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies from the lockfile
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Install Playwright browser and OS dependencies
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run tests
+        # A tag can select no tests in a project (e.g. @smoke in api): that is
+        # "nothing to run", not a failure, hence --pass-with-no-tests.
+        # Headed mode: the runner has no screen, so browsers run in a virtual X display (xvfb).
+        env:
+          GREP: ${{ needs.plan.outputs.grep }}
+          PROJECT: ${{ matrix.project }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$MODE" = "headed" ]; then
+            command -v xvfb-run >/dev/null || sudo apt-get install -y xvfb
+            export HEADED=true
+            xvfb-run --auto-servernum -- npx playwright test --project="$PROJECT" --pass-with-no-tests ${GREP:+--grep "$GREP"}
+          else
+            npx playwright test --project="$PROJECT" --pass-with-no-tests ${GREP:+--grep "$GREP"}
+          fi
+
+      # Names include the tag and project, so parallel jobs never overwrite each other.
+      - name: Upload HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ needs.plan.outputs.label }}-${{ matrix.project }}
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload JUnit report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ needs.plan.outputs.label }}-${{ matrix.project }}
+          path: test-results/junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload failure diagnostics (traces, screenshots, videos)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ needs.plan.outputs.label }}-${{ matrix.project }}
+          path: |
+            test-results/
+            !test-results/junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Allure report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ needs.plan.outputs.label }}-${{ matrix.project }}
+          path: allure-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Allure results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ needs.plan.outputs.label }}-${{ matrix.project }}
+          path: allure-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # One Allure report with the pass/fail results of every selected project.
+  allure-combined:
+    name: Allure report (${{ needs.plan.outputs.label }}, all selected projects)
+    needs: [plan, test]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js (LTS)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies from the lockfile
+        run: npm ci
+
+      - name: Download the selected projects' Allure results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-${{ needs.plan.outputs.label }}-*
+          path: all-allure-results
+
+      - name: Generate the combined Allure report
+        env:
+          REPORT_NAME: 'OrangeHRM ${{ inputs.tag }} (${{ inputs.mode }})'
+        run: |
+          if [ -z "$(ls -A all-allure-results 2>/dev/null)" ]; then
+            echo "No Allure results were produced." >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          npx allure generate all-allure-results/* --config allurerc.mjs --report-name "$REPORT_NAME"
+          node -e "const s=require('./allure-report/summary.json').stats; console.log('### Allure: ' + Object.entries(s).map(([k,v]) => k + ' ' + v).join(' | '))" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the combined Allure report
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ needs.plan.outputs.label }}-combined
+          path: allure-report/
+          if-no-files-found: ignore
+          retention-days: 30

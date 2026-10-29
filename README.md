@@ -21,7 +21,7 @@ Build a maintainable, runnable UI automation framework that:
 | Browsers | Chromium, Firefox, WebKit |
 | Test data | Generated at runtime (`src/utils/dataFactory.ts`) plus JSON files in `test-data/` |
 | Data setup and cleanup | OrangeHRM's REST API, authenticated through the browser session |
-| Reporting | List output, HTML report, JUnit XML; traces, screenshots and video on failure; run summary and Slack/Teams failure alerts |
+| Reporting | **Allure 3** report (generated after every run), Playwright HTML report, JUnit XML, list output; screenshots, videos and traces on failure; run summary and Slack/Teams failure alerts |
 | Accessibility | axe-core (`@axe-core/playwright`), WCAG 2.1 AA with a known-issues baseline |
 | CI | GitHub Actions, one matrix job per browser |
 
@@ -94,7 +94,8 @@ Selector strings appear **only** in `src/locators/`. Page classes and tests neve
 │       │   ├── AccessibilityHelper.ts #      axe-core WCAG scans with a baseline
 │       │   └── index.ts
 │       ├── reporters/
-│       │   └── FailureAlertReporter.ts #     report sender: run summary + Slack/Teams failure alerts
+│       │   ├── FailureAlertReporter.ts #     report sender: run summary + Slack/Teams failure alerts
+│       │   └── AllureReportGenerator.ts #    builds the Allure report after every run
 │       ├── env.ts                     #    environment configuration
 │       ├── routes.ts                  #    app routes and API endpoints
 │       ├── dataFactory.ts             #    unique employee test data
@@ -122,10 +123,10 @@ Selector strings appear **only** in `src/locators/`. Page classes and tests neve
 │       └── helpers.spec.ts            #    every helper and the alert message
 ├── test-data/                         # login.json, navigation.json, admin.json, accessibility-baseline.json
 ├── playwright.config.ts
+├── allurerc.mjs                       # Allure report settings (name, single file, history)
 ├── tsconfig.json
 ├── .env.example
 ├── README.md
-└── INTERVIEW_NOTES.md
 ```
 
 ### Example: one feature through all three layers
@@ -174,9 +175,11 @@ Every setting is optional. Set it as an environment variable or in a local `.env
 | `ADMIN_USERNAME` | `Admin` | Login user (public demo credentials) |
 | `ADMIN_PASSWORD` | `admin123` | Login password |
 | `WORKERS` | `2` | Parallel workers: a number, or a percentage of CPU cores such as `50%` |
-| `RETRIES` | `2` on CI, `0` locally | Retries per failed test |
+| `RETRIES` | `2` | How many times a failed test is retried, locally and on CI. `0` turns retries off |
 | `HEADED` | `false` | `true` shows the browser (same as `--headed`) |
+| `SLOW_MO` | `0` | Milliseconds to pause between browser actions, so a headed run can be followed by eye |
 | `ALERT_WEBHOOK_URL` | unset | Slack/Teams incoming webhook; posts an alert when tests fail or are flaky |
+| `ALLURE_GENERATE` | `true` | `false` skips building the Allure report after a run |
 | `CI` | unset | Set by GitHub Actions; enables CI retries and `forbidOnly` |
 
 Unset or empty values fall back to the defaults. `src/utils/env.ts` uses `||`, so the empty strings GitHub Actions passes for missing variables also count as unset.
@@ -195,9 +198,14 @@ All commands below are defined in `package.json`.
 | `npm run test:webkit` | UI tests in WebKit only |
 | `npm run test:api` | REST API tests (`tests/api/`), no browser |
 | `npm run test:security` | Security tests (`tests/security/`) |
+| `npm run test:headless` | All tests, browsers hidden (the default mode, stated explicitly) |
 | `npm run test:headed` | All tests with visible browsers |
+| `npm run test:headed:chromium` | UI tests in a visible Chromium window |
+| `npm run test:failed` | Re-runs **only the tests that failed** in the previous run (`--last-failed`). It needs a previous run that finished; with no record of one, Playwright runs everything |
 | `npm run test:debug` | Opens the Playwright Inspector and pauses at each step |
-| `npm run report` | Serves the last HTML report (`playwright-report/`) |
+| `npm run report` | Serves the last Playwright HTML report (`playwright-report/`) |
+| `npm run allure:open` | Serves the last Allure report in your browser |
+| `npm run allure:generate` | Rebuilds the Allure report from `allure-results/` (normally automatic) |
 | `npm run typecheck` | `tsc --noEmit` over the whole project |
 | `npm run install:browsers` | Installs the three browsers and their OS dependencies |
 
@@ -210,6 +218,75 @@ npm run test:debug -- tests/employee-crud.spec.ts --project=chromium
 npx playwright test -g "finds an employee by name"
 WORKERS=4 npm test                               # PowerShell: $env:WORKERS=4; npm test
 ```
+
+## Reports
+
+Every run produces all of these. No extra command is needed.
+
+| Report | Where | What it's for |
+| --- | --- | --- |
+| **Allure report** | `allure-report/index.html` | Pass/fail dashboard with steps, errors, failure screenshot, video and trace, environment details, and the trend across runs |
+| **Playwright HTML report** | `playwright-report/index.html` (`npm run report`) | Playwright's own report with steps and the built-in trace viewer |
+| **JUnit XML** | `test-results/junit.xml` | For CI systems and test-management tools |
+| **Run summary** | `test-results/run-summary.json` (+ GitHub job summary) | Totals and failed/flaky tests; source of the Slack/Teams failure alert |
+| **Console (list)** | terminal | Live progress while the tests run |
+
+### Failure evidence: screenshots, videos and traces
+
+Configured in `playwright.config.ts` and attached automatically to the **failed** test in both the Allure and the Playwright HTML reports:
+
+| Evidence | Setting | When it's kept |
+| --- | --- | --- |
+| Screenshot | `screenshot: 'only-on-failure'` | When a test fails |
+| Video | `video: 'retain-on-failure'` | When a test fails |
+| Trace | `trace: 'retain-on-failure-and-retries'` | When a test fails, and for every retry |
+
+A trace is a full recording of the test: each action with before/after DOM snapshots, network calls, console output and errors. Ways to open it:
+
+- **Allure report:** open the failed test, go to *Attachments*, and select **trace**.
+- **Playwright HTML report:** `npm run report`, open the failed test, and click the trace.
+- **Directly:** `npx playwright show-trace test-results/<test-folder>/trace.zip`, or drag the zip into [trace.playwright.dev](https://trace.playwright.dev).
+
+### Allure report
+
+[Allure 3](https://allurereport.org/) runs on Node, so it needs **no Java**. It uses two pieces:
+
+- **`allure-playwright`** (a reporter in `playwright.config.ts`) records every test's result, steps, error and attachments into `allure-results/`.
+- **`AllureReportGenerator`** (`src/utils/reporters/`) builds the HTML report **automatically at the end of every run**, whether tests passed or failed and whatever command started them. It also clears the previous run's results at the start, so each report shows exactly one run.
+
+The report settings are in `allurerc.mjs`:
+
+- **One self-contained file:** `allure-report/index.html` opens with a double-click, so it's easy to share or attach.
+- **Trend across runs:** pass/fail history is kept in `allure-history/` (last 30 runs, local and gitignored).
+- **Environment section:** base URL, OS, Node.js version, workers, retries, headed/headless mode, and CI or local.
+
+```bash
+npm test                 # any test command; the Allure report is built when it finishes
+npm run allure:open      # serve it in your browser (or just open allure-report/index.html)
+```
+
+To skip report generation for a quick local run, set `ALLURE_GENERATE=false` (PowerShell: `$env:ALLURE_GENERATE='false'`).
+
+## Headed and headless modes
+
+Tests run **headless** (no visible browser) by default, locally and in CI.
+
+| How | Mode |
+| --- | --- |
+| `npm test` / `npm run test:headless` | headless |
+| `npm run test:headed`, or add `--headed` to any command | headed (browser windows visible) |
+| `npm run test:headed:chromium` | headed, Chromium only |
+| `HEADED=true` in the environment or `.env` | headed for every command |
+| `SLOW_MO=500` together with headed mode | pauses 500 ms between browser actions, so you can follow along |
+| `npm run test:debug` | headed and paused, stepping through in the Playwright Inspector |
+
+PowerShell example (one test, headed, slowed down):
+
+```powershell
+$env:SLOW_MO=500; npx playwright test tests/employee-crud.spec.ts --project=chromium --headed; Remove-Item Env:SLOW_MO
+```
+
+**In CI:** the **Tagged Test Run** workflow has a *mode* choice (`headless` / `headed`). GitHub's Linux runners have no screen, so headed mode runs the browsers inside a virtual display (`xvfb-run`). The recorded videos and traces show the run exactly as it happened. The automatic workflow always runs headless.
 
 ## Page Object Model and custom fixtures
 
@@ -401,7 +478,7 @@ Login doesn't wait for a page load: with empty required fields the browser never
 - Projects: `setup` runs first. It's followed by the UI projects `chromium`, `firefox` and `webkit`, which skip `tests/api` and `tests/security`, then by `api` (no browser) and `security` (Chromium). Each depends on `setup`.
 - **Independence:** each test has its own browser context. Tests that change data use their own uniquely named records. The saved session is read-only. Nothing depends on test order.
 - **Timeouts:** 90 s per test, 15 s per action and assertion, 30 s for navigation and for loading list pages.
-- **Retries:** 2 on CI, 0 locally. A test that passes only on retry is reported as **flaky**, not passed.
+- **Retries:** a failed test is retried **twice** (3 attempts in total), locally and on CI. A test that passes only on a retry is reported as **flaky**, not as a clean pass, in the console, the HTML report, the Allure report (*Retries* tab) and the failure alert. Each attempt keeps its own screenshot, video and trace. Set `RETRIES=0` to turn retries off, e.g. while debugging.
 - **Diagnostics:** screenshots on failure; traces kept for failed and retried runs (`retain-on-failure-and-retries`); video kept on failure.
 
 ## Tags: smoke and regression
@@ -424,19 +501,46 @@ Smoke and regression together cover the whole suite with no overlap: 12 + 216 te
 - A matrix runs one job per project: `chromium`, `firefox`, `webkit`, `api` and `security`, with `fail-fast: false`. `api` and `security` install Chromium only, which they need for the login setup.
 - Steps: checkout (without persisting credentials), Node 24 LTS with an npm cache, `npm ci`, `npm run typecheck`, `npx playwright install --with-deps <browser>`, then `npx playwright test --project=<project>`.
 - Artifacts are uploaded even when tests fail:
-  - `playwright-report-<project>`: the HTML report
+  - **`allure-report-combined`**: **one Allure report with the pass/fail results of all five projects**, built by the final *Allure report (all projects)* job. Its totals also appear on the run's summary page.
+  - `allure-report-<project>`: that project's Allure report
+  - `playwright-report-<project>`: the Playwright HTML report
   - `junit-<project>`: `junit.xml`
   - `test-results-<project>`: traces, screenshots and videos (only when a test failed)
+  - `allure-results-<project>`: raw Allure results (inputs for the combined report)
 
   Each name includes the project, so the matrix jobs never overwrite each other's artifacts.
 - **Security:** `permissions: contents: read`. No secret is required, because the defaults are the public demo credentials. Optional `BASE_URL` (repository variable) and `ADMIN_USERNAME`/`ADMIN_PASSWORD` (repository secrets) are read from the environment, never printed, and masked by Actions if they are printed.
 
+### Running by tag: `tagged-tests.yml`
+
+A second workflow, **Tagged Test Run**, runs only the tests you choose. It never starts automatically.
+
+1. Open the repository's **Actions** tab and select **Tagged Test Run** in the left sidebar.
+2. Click **Run workflow**, pick the branch, and choose:
+   - **tag:** `@smoke`, `@regression` or `all`
+   - **projects:** `all` (3 browsers + api + security), `ui-browsers` (3 browsers), or one of `chromium`, `firefox`, `webkit`, `api`, `security`
+   - **mode:** `headless` (default) or `headed` (browsers run in a virtual display)
+3. Click **Run workflow**. A short *Plan* job turns your choices into one parallel job per project. Each job is named after the tag and project, e.g. `smoke (firefox)`. A final job merges them into one Allure report, `allure-report-<tag>-combined`.
+
+| You choose | Jobs that run |
+| --- | --- |
+| `@smoke` + `all` | smoke on chromium, firefox, webkit, api, security (5 jobs) |
+| `@regression` + `ui-browsers` | regression on chromium, firefox, webkit (3 jobs) |
+| `all` + `api` | every API test (1 job) |
+
+- A project with no tests for the chosen tag, such as `@smoke` on `api`, **passes** with "no tests" (`--pass-with-no-tests`) rather than failing.
+- Artifact names include the tag and the project (`playwright-report-smoke-webkit`, `junit-regression-api`, …), so runs never overwrite each other.
+- Inputs are checked against an allow-list before use, and are never inserted directly into a shell command.
+
+From the command line (GitHub CLI): `gh workflow run tagged-tests.yml -f tag=@smoke -f projects=all -f mode=headed`.
+
 ### Viewing results
 
-1. Open the repository's **Actions** tab and select the run.
-2. The run summary shows each browser's job status. Open a job to see the `list` output of the *Run Playwright tests* step.
-3. Under **Artifacts**, download `playwright-report-<browser>`, unzip it, and run `npx playwright show-report <unzipped-folder>`. You can also open `index.html` directly, but the embedded trace viewer only works when the report is served.
-4. To debug a failure, download `test-results-<browser>` and open a trace with `npx playwright show-trace <test-folder>/trace.zip`. You can also drag the zip into [trace.playwright.dev](https://trace.playwright.dev).
+1. Open the repository's **Actions** tab and select the run. The run summary page shows each job's status, the pass/fail/flaky totals, and the Allure totals.
+2. **Pass/fail results:** under **Artifacts**, download **`allure-report-combined`** (or `allure-report-<tag>-combined` for a tagged run), unzip it, and open `index.html`. It's a single self-contained file covering every project.
+3. **A failed test:** in the Allure report, open the test to see the error, the failure screenshot, the video and the trace (*Attachments* → **trace**).
+4. Playwright's own report: download `playwright-report-<project>`, unzip it, and run `npx playwright show-report <unzipped-folder>`. Its trace viewer only works when the report is served this way.
+5. Raw evidence: download `test-results-<project>` and open a trace with `npx playwright show-trace <test-folder>/trace.zip`, or drag the zip into [trace.playwright.dev](https://trace.playwright.dev).
 
 ## Requirement-to-assertion traceability
 

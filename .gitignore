@@ -7,6 +7,11 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 
+# Allure: raw results, generated report, local trend history
+/allure-results/
+/allure-report/
+/allure-history/
+
 # Saved login session (contains auth cookies)
 /.auth/
 

@@ -1,8 +1,26 @@
 import { test, type BrowserContext, type Page, type Response } from '@playwright/test';
 
-/** Errors caused by the network rather than the app: worth one more try. */
-const NETWORK_ERROR =
-  /net::ERR_|NS_ERROR_|NS_BINDING_ABORTED|Could not connect|Connection (refused|reset)|WebKit encountered an internal error|Timeout \d+ms exceeded/i;
+/**
+ * Errors caused by the network rather than the app: worth one more try.
+ * Each engine words them differently: Chromium "net::ERR_…" or a redirect to its
+ * own "chrome-error://" page, Firefox "NS_ERROR_…", WebKit plain text such as
+ * "Timeout was reached" or "Could not connect to server".
+ */
+const NETWORK_ERROR = new RegExp(
+  [
+    'net::ERR_',
+    'interrupted by another navigation to "chrome-error://',
+    'NS_ERROR_',
+    'NS_BINDING_ABORTED',
+    'Could not connect',
+    'Connection (refused|reset)',
+    'The network connection was lost',
+    'Timeout was reached',
+    'WebKit encountered an internal error',
+    'Timeout \\d+ms exceeded',
+  ].join('|'),
+  'i',
+);
 
 /** Adds a note to the current test's report when called inside a test; otherwise logs it. */
 function note(type: string, description: string): void {
@@ -64,10 +82,22 @@ export class BrowserHelper {
         return await page.goto(url, { waitUntil: 'load' });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (attempt >= attempts || !NETWORK_ERROR.test(message)) throw error;
+        if (attempt >= attempts || !BrowserHelper.isNetworkError(message)) throw error;
         note('navigation-retry', `Attempt ${attempt} to open ${url} failed (${message.split('\n')[0]}); retrying`);
+        // Chromium shows its own error page a moment AFTER goto() has thrown; retrying
+        // before it lands gets the retry interrupted. Wait for it (event-based, capped).
+        if (page.context().browser()?.browserType().name() === 'chromium') {
+          await page
+            .waitForURL((current) => current.protocol === 'chrome-error:', { waitUntil: 'commit', timeout: 3_000 })
+            .catch(() => undefined);
+        }
       }
     }
+  }
+
+  /** True when a navigation error came from the network (any engine), not from the application. */
+  static isNetworkError(message: string): boolean {
+    return NETWORK_ERROR.test(message);
   }
 
   /**

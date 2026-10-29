@@ -31,8 +31,11 @@ export const env = {
   adminPassword: process.env.ADMIN_PASSWORD || 'admin123',
   isCI,
   workers: parseWorkers(process.env.WORKERS, 2),
-  retries: parseCount(process.env.RETRIES, isCI ? 2 : 0),
+  /** A failed test is retried this many times (locally and on CI); RETRIES=0 turns retries off. */
+  retries: parseCount(process.env.RETRIES, 2),
   headed: ['1', 'true'].includes((process.env.HEADED ?? '').toLowerCase()),
+  /** Pause between browser actions (ms) so a headed run can be followed by eye. */
+  slowMo: parseCount(process.env.SLOW_MO, 0),
 } as const;
 
 /** Authenticated browser state written by `tests/auth.setup.ts` and reused by every test. */
