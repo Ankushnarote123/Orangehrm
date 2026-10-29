@@ -28,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # `browser` is what to install. api and security still need Chromium for the login setup.
+          # `browser` is the extra browser the job needs; Chromium is always installed for the login setup.
           - { project: chromium, browser: chromium }
           - { project: firefox, browser: firefox }
           - { project: webkit, browser: webkit }
@@ -64,7 +64,9 @@ jobs:
         run: npm run typecheck
 
       - name: Install Playwright browser and OS dependencies
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        # Chromium is always needed: the "setup" project (login once, save the session) runs in Chromium
+        # for every job. Then the job's own browser (firefox/webkit); installing chromium twice is a no-op.
+        run: npx playwright install --with-deps chromium ${{ matrix.browser }}
 
       - name: Run Playwright tests
         run: npx playwright test --project=${{ matrix.project }}

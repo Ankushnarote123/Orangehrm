@@ -498,7 +498,7 @@ Smoke and regression together cover the whole suite with no overlap: 12 + 216 te
 
 `.github/workflows/playwright.yml` runs on **every push to any branch**, on **pull requests into `main`**, and manually with *Run workflow* in the Actions tab. If you push again to the same branch while a run is still going, the older run is cancelled.
 
-- A matrix runs one job per project: `chromium`, `firefox`, `webkit`, `api` and `security`, with `fail-fast: false`. `api` and `security` install Chromium only, which they need for the login setup.
+- A matrix runs one job per project: `chromium`, `firefox`, `webkit`, `api` and `security`, with `fail-fast: false`. Every job also installs Chromium, because the login `setup` project (which runs before every project) uses Chromium.
 - Steps: checkout (without persisting credentials), Node 24 LTS with an npm cache, `npm ci`, `npm run typecheck`, `npx playwright install --with-deps <browser>`, then `npx playwright test --project=<project>`.
 - Artifacts are uploaded even when tests fail:
   - **`allure-report-combined`**: **one Allure report with the pass/fail results of all five projects**, built by the final *Allure report (all projects)* job. Its totals also appear on the run's summary page.

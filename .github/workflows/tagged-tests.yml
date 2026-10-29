@@ -68,7 +68,7 @@ jobs:
             *) echo "::error::Unsupported projects value: $PROJECTS"; exit 1 ;;
           esac
 
-          # api and security still need Chromium for the login setup project.
+          # Chromium is always installed too, because the login setup project runs in Chromium.
           entries=""
           for project in $list; do
             case "$project" in firefox|webkit) browser="$project" ;; *) browser="chromium" ;; esac
@@ -116,7 +116,9 @@ jobs:
         run: npm run typecheck
 
       - name: Install Playwright browser and OS dependencies
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        # Chromium is always needed: the "setup" project (login once, save the session) runs in Chromium
+        # for every job. Then the job's own browser (firefox/webkit); installing chromium twice is a no-op.
+        run: npx playwright install --with-deps chromium ${{ matrix.browser }}
 
       - name: Run tests
         # A tag can select no tests in a project (e.g. @smoke in api): that is
